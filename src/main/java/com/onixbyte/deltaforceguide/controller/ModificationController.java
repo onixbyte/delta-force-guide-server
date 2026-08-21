@@ -1,10 +1,10 @@
 package com.onixbyte.deltaforceguide.controller;
 
-import com.onixbyte.deltaforceguide.domain.dto.ModificationBatchCreateRequest;
 import com.onixbyte.deltaforceguide.domain.dto.ModificationRequest;
 import com.onixbyte.deltaforceguide.domain.dto.ModificationResponse;
 import com.onixbyte.deltaforceguide.domain.dto.PageResponse;
 import com.onixbyte.deltaforceguide.domain.entity.User;
+import com.onixbyte.deltaforceguide.security.annotation.RequiresAdmin;
 import com.onixbyte.deltaforceguide.security.annotation.RequiresAuth;
 import com.onixbyte.deltaforceguide.security.resolver.CurrentUser;
 import com.onixbyte.deltaforceguide.service.ModificationService;
@@ -76,16 +76,6 @@ public class ModificationController {
     }
 
     @RequiresAuth
-    @Operation(description = "批量创建改装")
-    @PostMapping("/batch")
-    public List<ModificationResponse> batchCreate(
-            @CurrentUser User user,
-            @Valid @RequestBody ModificationBatchCreateRequest request
-    ) {
-        return modificationService.batchCreate(request.modifications(), user);
-    }
-
-    @RequiresAuth
     @Operation(description = "修改指定改装")
     @PutMapping("/{id}")
     public ModificationResponse update(@PathVariable Long id, @Valid @RequestBody ModificationRequest request) {
@@ -105,5 +95,15 @@ public class ModificationController {
     @Validated
     public void batchDelete(@RequestParam List<@Positive Long> ids) {
         modificationService.batchDelete(ids);
+    }
+
+    @RequiresAdmin
+    @Operation(description = "创建全局改装")
+    @PostMapping("/public")
+    public ModificationResponse createPublicModification(
+            @CurrentUser User user,
+            @Validated @RequestBody ModificationRequest request
+    ) {
+        return modificationService.createPublicModification(request, user);
     }
 }

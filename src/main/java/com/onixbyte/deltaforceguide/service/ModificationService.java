@@ -6,26 +6,24 @@ import com.onixbyte.deltaforceguide.domain.dto.AccessoryRequest;
 import com.onixbyte.deltaforceguide.domain.dto.ModificationRequest;
 import com.onixbyte.deltaforceguide.domain.dto.ModificationResponse;
 import com.onixbyte.deltaforceguide.domain.dto.PageResponse;
-import com.onixbyte.deltaforceguide.domain.dto.TuningRequest;
-import com.onixbyte.deltaforceguide.domain.entity.Accessory;
-import com.onixbyte.deltaforceguide.domain.entity.Firearm;
 import com.onixbyte.deltaforceguide.domain.entity.Modification;
-import com.onixbyte.deltaforceguide.domain.entity.Tuning;
 import com.onixbyte.deltaforceguide.domain.entity.User;
+import com.onixbyte.deltaforceguide.enumeration.ModificationStatus;
+import com.onixbyte.deltaforceguide.exeption.InternalServerErrorException;
+import com.onixbyte.deltaforceguide.exeption.NotFoundException;
+import com.onixbyte.deltaforceguide.manager.FirearmManager;
 import com.onixbyte.deltaforceguide.manager.ModificationManager;
-import com.onixbyte.deltaforceguide.repository.FirearmRepository;
-import com.onixbyte.deltaforceguide.repository.ModificationRepository;
 import com.onixbyte.deltaforceguide.specification.ModificationSpecification;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Service handling modification business logic including CRUD, batch operations, and tag filtering.
@@ -35,21 +33,19 @@ import java.util.Set;
 @Service
 public class ModificationService {
 
-    private final ModificationRepository modificationRepository;
-    private final FirearmRepository firearmRepository;
+    private static final Logger log = LoggerFactory.getLogger(ModificationService.class);
     private final ModificationManager modificationManager;
     private final ObjectMapper objectMapper;
+    private final FirearmManager firearmManager;
 
     public ModificationService(
-            ModificationRepository modificationRepository,
-            FirearmRepository firearmRepository,
             ModificationManager modificationManager,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            FirearmManager firearmManager
     ) {
-        this.modificationRepository = modificationRepository;
-        this.firearmRepository = firearmRepository;
         this.modificationManager = modificationManager;
         this.objectMapper = objectMapper;
+        this.firearmManager = firearmManager;
     }
 
     /**
@@ -66,7 +62,8 @@ public class ModificationService {
             try {
                 tagsJson = objectMapper.writeValueAsString(tags);
             } catch (JsonProcessingException e) {
-                throw new RuntimeException("Failed to serialize tags", e);
+                log.error("Failed to serialise tags.", e);
+                throw new InternalServerErrorException("Failed to serialise tags.");
             }
         }
 
@@ -87,9 +84,9 @@ public class ModificationService {
      * @return the modification response
      */
     public ModificationResponse queryById(Long id) {
-        return modificationRepository.findById(id)
+        return modificationManager.findById(id)
                 .map(ModificationResponse::from)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Modification not found: " + id));
+                .orElseThrow(() -> new NotFoundException("Modification not found: " + id));
     }
 
     /**
@@ -99,7 +96,7 @@ public class ModificationService {
      * @return list of unique tag strings
      */
     public List<String> findAllTags(Long firearmId) {
-        return modificationRepository.findAllTags(firearmId);
+        return modificationManager.findAllTags(firearmId);
     }
 
     /**
@@ -110,18 +107,21 @@ public class ModificationService {
      * @return the created modification response
      */
     public ModificationResponse create(ModificationRequest request, User user) {
-        return modificationManager.create(request, user);
-    }
-
-    /**
-     * Creates multiple modifications in a single batch operation.
-     *
-     * @param requests list of modification creation requests
-     * @param user     the authenticated user creating the modifications
-     * @return list of created modification responses
-     */
-    public List<ModificationResponse> batchCreate(List<ModificationRequest> requests, User user) {
-        return modificationManager.batchCreate(requests, user);
+        var firearm = firearmManager.findById(request.firearmId())
+                .orElseThrow(() -> new NotFoundException("Firearm not found: " + request.firearmId()));
+        var modification = modificationManager.save(Modification.builder()
+                .firearm(firearm)
+                .user(user)
+                .name(request.name())
+                .code(request.code())
+                .tags(request.tags())
+                .accessories(request.accessories().stream().map(AccessoryRequest::toEntity).toList())
+                .note(request.note())
+                .author(user.getUsername())
+                .videoUrl(request.videoUrl())
+                .createBy(user.getId())
+                .build());
+        return ModificationResponse.from(modification);
     }
 
     /**
@@ -132,21 +132,29 @@ public class ModificationService {
      * @return the updated modification response
      */
     public ModificationResponse update(Long id, ModificationRequest request) {
-        Modification modification = modificationRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Modification not found: " + id));
-        Firearm firearm = firearmRepository.findById(request.firearmId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Firearm not found: " + request.firearmId()));
+        var modification = modificationManager.findById(id)
+                .orElseThrow(() -> new NotFoundException("Modification not found: " + id));
+        var firearm = firearmManager.findById(request.firearmId())
+                .orElseThrow(() -> new NotFoundException("Firearm not found: " + request.firearmId()));
+
+        var accessories = request.accessories()
+                .stream()
+                .map(AccessoryRequest::toEntity)
+                .toList();
+
+        var tags = Optional.ofNullable(request.tags())
+                .orElseGet(ArrayList::new);
 
         modification.setFirearm(firearm);
         modification.setName(request.name());
         modification.setCode(request.code());
-        modification.setTags(safeTags(request.tags()));
-        modification.setAccessories(toAccessories(request.accessories()));
+        modification.setTags(tags);
+        modification.setAccessories(accessories);
         modification.setNote(request.note());
         modification.setAuthor(request.author());
         modification.setVideoUrl(request.videoUrl());
 
-        return ModificationResponse.from(modificationRepository.save(modification));
+        return ModificationResponse.from(modificationManager.save(modification));
     }
 
     /**
@@ -155,9 +163,9 @@ public class ModificationService {
      * @param id the modification ID to delete
      */
     public void delete(Long id) {
-        Modification modification = modificationRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Modification not found: " + id));
-        modificationRepository.delete(modification);
+        var modification = modificationManager.findById(id)
+                .orElseThrow(() -> new NotFoundException("Modification not found: " + id));
+        modificationManager.delete(modification);
     }
 
     /**
@@ -166,58 +174,39 @@ public class ModificationService {
      * @param ids list of modification IDs to delete
      */
     public void batchDelete(List<Long> ids) {
-        Set<Long> uniqueIds = new LinkedHashSet<>(ids);
-        List<Modification> modifications = modificationRepository.findAllById(uniqueIds);
+        var uniqueIds = new LinkedHashSet<>(ids);
+        var modifications = modificationManager.findAllById(uniqueIds);
 
         if (modifications.size() != uniqueIds.size()) {
-            Set<Long> foundIds = modifications.stream()
+            var foundIds = modifications.stream()
                     .map(Modification::getId)
-                    .collect(java.util.stream.Collectors.toSet());
-            List<Long> missingIds = uniqueIds.stream()
-                    .filter(id -> !foundIds.contains(id))
+                    .collect(Collectors.toSet());
+            var missingIds = uniqueIds.stream()
+                    .filter((id) -> !foundIds.contains(id))
                     .toList();
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Modification not found: " + missingIds);
+            throw new NotFoundException("Modification not found: " + missingIds);
         }
 
-        modificationRepository.deleteAllInBatch(modifications);
+        modificationManager.deleteAllInBatch(modifications);
     }
 
-    private List<String> safeTags(List<String> tags) {
-        return tags == null ? new ArrayList<>() : tags;
-    }
-
-    private List<Accessory> toAccessories(List<AccessoryRequest> accessoryRequests) {
-        if (accessoryRequests == null) {
-            return new ArrayList<>();
-        }
-
-        return accessoryRequests.stream()
-                .map(this::toAccessory)
-                .toList();
-    }
-
-    private Accessory toAccessory(AccessoryRequest request) {
-        Accessory accessory = new Accessory();
-        accessory.setSlotName(request.slotName());
-        accessory.setAccessoryName(request.accessoryName());
-        accessory.setTunings(toTunings(request.tunings()));
-        return accessory;
-    }
-
-    private List<Tuning> toTunings(List<TuningRequest> tuningRequests) {
-        if (tuningRequests == null) {
-            return new ArrayList<>();
-        }
-
-        return tuningRequests.stream()
-                .map(this::toTuning)
-                .toList();
-    }
-
-    private Tuning toTuning(TuningRequest request) {
-        Tuning tuning = new Tuning();
-        tuning.setTuningName(request.tuningName());
-        tuning.setTuningValue(request.tuningValue());
-        return tuning;
+    public ModificationResponse createPublicModification(ModificationRequest request, User user) {
+        var firearm = firearmManager.findById(request.firearmId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Firearm not found: " + request.firearmId()));
+        var modification = modificationManager.save(Modification.builder()
+                .firearm(firearm)
+                .user(null)
+                .name(request.name())
+                .code(request.code())
+                .tags(request.tags())
+                .accessories(request.accessories().stream().map(AccessoryRequest::toEntity).toList())
+                .note(request.note())
+                .author(request.author())
+                .videoUrl(request.videoUrl())
+                .status(ModificationStatus.PUBLISHED)
+                .createBy(user.getId())
+                .build());
+        return ModificationResponse.from(modification);
     }
 }

@@ -1,6 +1,5 @@
 package com.onixbyte.deltaforceguide.config;
 
-import com.onixbyte.deltaforceguide.interceptor.GitHubWebhookInterceptor;
 import com.onixbyte.deltaforceguide.interceptor.TrafficInterceptor;
 import com.onixbyte.deltaforceguide.properties.AppProperties;
 import com.onixbyte.deltaforceguide.security.resolver.CurrentUserArgumentResolver;
@@ -19,26 +18,21 @@ public class AppConfig implements WebMvcConfigurer {
 
     private final TrafficInterceptor trafficInterceptor;
 
-    private final GitHubWebhookInterceptor gitHubWebhookInterceptor;
 
     private final CurrentUserArgumentResolver currentUserArgumentResolver;
 
     @Autowired
     public AppConfig(
             TrafficInterceptor trafficInterceptor,
-            GitHubWebhookInterceptor gitHubWebhookInterceptor,
             CurrentUserArgumentResolver currentUserArgumentResolver
     ) {
         this.trafficInterceptor = trafficInterceptor;
-        this.gitHubWebhookInterceptor = gitHubWebhookInterceptor;
         this.currentUserArgumentResolver = currentUserArgumentResolver;
     }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(trafficInterceptor);
-        registry.addInterceptor(gitHubWebhookInterceptor)
-                .addPathPatterns("/webhooks/github");
     }
 
     @Override

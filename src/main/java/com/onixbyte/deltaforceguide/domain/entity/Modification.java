@@ -182,6 +182,11 @@ public class Modification {
         this.status = status;
     }
 
+    @PrePersist
+    protected void prePersist() {
+        this.createTime = OffsetDateTime.now();
+    }
+
     public static Builder builder() {
         return new Builder();
     }

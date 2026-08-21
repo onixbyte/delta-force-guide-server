@@ -1,5 +1,6 @@
 package com.onixbyte.deltaforceguide.domain.dto;
 
+import com.onixbyte.deltaforceguide.domain.entity.Tuning;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -14,5 +15,12 @@ public record TuningRequest(
         @NotNull(message = "调校值不能为空")
         Double tuningValue
 ) {
+
+    public Tuning toEntity() {
+        var tuning = new Tuning();
+        tuning.setTuningName(tuningName());
+        tuning.setTuningValue(tuningValue());
+        return tuning;
+    }
 }
 
